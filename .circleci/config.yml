@@ -1,0 +1,103 @@
+#version
+version: 2.1
+
+#job
+jobs:
+  Quality-Check:
+    docker:
+      # node for image
+      - image: node:16-alpine3.17
+    steps:
+      - checkout
+      - run:
+          name: Code Scan Using Jest
+          command: |
+            npm install 
+            npm run test
+
+  Build-Container-Image:
+    parameters:
+      SERVICE_TYPE:
+        description: name of service
+        type: string
+        default: front-end
+      SERVICE_NAME:
+        description: name of service
+        type: string
+        default: all
+    docker:
+      - image: public.ecr.aws/kubeopsskills/circleci:1.0.0-docker-gcloud
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 20.10.7
+      - run:
+          name: Gcloud Authentication
+          command: |
+            docker login -u jumpboxacademy -p dckr_pat_z9uofZawQQVC2BnXWRss5xjIWDk docker.io
+      - run:
+          name: Build and Push Docker Image to Container Registry
+          command: |
+            echo "export COMMIT_ID=$(git log --format="%H" -n 2 | head -n 1)" >> $BASH_ENV
+            source $BASH_ENV 
+            docker build -t jumpboxacademy/<< parameters.SERVICE_NAME >>:$COMMIT_ID . 
+            docker push jumpboxacademy/<< parameters.SERVICE_NAME >>:$COMMIT_ID
+            echo "$COMMIT_ID" > source_commit_id
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project/source_commit_id
+
+#workflows
+workflows:
+  version:
+    2
+
+    # Dev
+  Dev_WorkFlow:
+    jobs:
+      - Quality-Check:
+          filters:
+            branches:
+              only:
+                - dev
+
+      # Job#1 - Config source code Repos
+      - Build-Container-Image:
+          SERVICE_NAME: continuous-testing-matoom
+          requires:
+            - Quality-Check
+          filters:
+            branches:
+              only:
+                - dev
+          # context:
+          # - q-chang-dev
+      - Checkout-Kubernetes-Config:
+          CONFIGURATION_REPO_URL: github.com/jumpbox-qchang/apps-k8s-config
+          CONFIGURATION_REPO_NAME: apps-k8s-config
+          CONFIGURATION_BRANCH: dev
+          requires:
+            - Build-Container-Image
+          filters:
+            branches:
+              only:
+                - dev
+          # context:
+          # - q-chang-dev
+
+      - Set-Version-To-Service:
+          CONFIGURATION_BRANCH: dev
+          SERVICE_NAME: continuous-testing-matoom
+          RELEASE_VERSION_COMMAND: cat source_commit_id
+          CONFIGURATION_REPO_NAME: apps-k8s-config
+          BOT_EMAIL: support@dependabot.com
+          BOT_USERNAME: dependabot[bot]
+          requires:
+            - Checkout-Kubernetes-Config
+          filters:
+            branches:
+              only:
+                - dev
+          # context:
+          # - q-chang-dev
