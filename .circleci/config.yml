@@ -15,6 +15,7 @@ workflows:
           name: check-updated-files
 
           mapping: |
-            Quality-Check/.* run-quality-check-job true
+            service1/.* run-build-service-1-job true
+
           base-revision: dev
           config-path: .circleci/continue_config.yml
